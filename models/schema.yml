@@ -1,0 +1,81 @@
+version: 2
+
+models:
+  - name: int_trading_data_quality
+    description: "Trading data with comprehensive quality validations and quarantine capabilities"
+    columns:
+      - name: trade_id
+        description: "Unique trade identifier"
+        tests:
+          - unique
+          - not_null
+      - name: data_quality_status
+        description: "Status of data quality checks"
+        tests:
+          - accepted_values:
+              values: ['PASSED_ALL_TESTS']
+      - name: quantity
+        description: "Trade quantity (validated)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: price
+        description: "Trade price (validated)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+
+  - name: int_market_data_quality
+    description: "Market data (stocks and forex) with OHLC validations and quarantine capabilities"
+    columns:
+      - name: run_date
+        description: "Market data date"
+        tests:
+          - not_null
+      - name: data_quality_status
+        description: "Status of data quality checks"
+        tests:
+          - accepted_values:
+              values: ['PASSED_ALL_TESTS']
+      - name: high
+        description: "Daily high price (validated)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: low
+        description: "Daily low price (validated)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: daily_volatility_pct
+        description: "Daily price volatility percentage"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0 and <= 50"
+
+  - name: fct_data_quality_dashboard
+    description: "Comprehensive data quality monitoring dashboard"
+    columns:
+      - name: data_source
+        description: "Source of the data (TRADING_DATA, MARKET_DATA)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['TRADING_DATA', 'MARKET_DATA']
+      - name: data_quality_score
+        description: "Quality score from 0-100 (higher is better)"
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: ">= 0 and <= 100"
+      - name: failure_severity
+        description: "Severity classification of data quality issues"
+        tests:
+          - accepted_values:
+              values: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+
+tests:
+  - name: test_ohlc_relationship_consistency
+    description: "Custom test to ensure OHLC price relationships are valid across all market data"
+    
+  - name: test_trading_data_completeness
+    description: "Custom test to ensure no critical trading data is missing" 

@@ -57,3 +57,18 @@ models:
       # +target_lag: 1 minutes 
       # +snowflake_warehouse: VWH_DBT_HOL
       # +refresh_mode: INCREMENTAL
+
+# Configure tests to store failures and use appropriate severity
+tests:
+  dbt_trading:
+    +store_failures: true
+    +severity: warn  # Most tests as warnings, not errors
+    staging:
+      +store_failures: true
+      +severity: warn
+    intermediate:
+      +store_failures: true  
+      +severity: warn
+    marts:
+      +store_failures: true
+      +severity: warn

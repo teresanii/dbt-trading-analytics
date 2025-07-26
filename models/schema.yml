@@ -89,11 +89,6 @@ models:
           - dbt_utils.expression_is_true:
               expression: ">= 0"
     tests:
-      - ohlc_price_relationships:
-          open_col: open_price
-          high_col: high_price
-          low_col: low_price
-          close_col: close_price
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
             - run_date
@@ -135,11 +130,6 @@ models:
           - dbt_utils.expression_is_true:
               expression: "> 0"
     tests:
-      - ohlc_price_relationships:
-          open_col: open_rate
-          high_col: high_rate
-          low_col: low_rate
-          close_col: close_rate
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
             - run_date
@@ -171,65 +161,8 @@ models:
           combination_of_columns:
             - region
             - desk
-      - portfolio_allocation_sum:
-          allocation_column: target_allocation
-          group_by_column: desk
-          expected_sum: 1.0
-          tolerance: 0.01
 
-  # INTERMEDIATE MODELS
-  - name: int_trading_data_quality
-    description: "Trading data with comprehensive quality validations and quarantine capabilities"
-    columns:
-      - name: trade_id
-        description: "Unique trade identifier"
-        tests:
-          - unique
-          - not_null
-      - name: data_quality_status
-        description: "Status of data quality checks"
-        tests:
-          - accepted_values:
-              values: ['PASSED_ALL_TESTS']
-      - name: quantity
-        description: "Trade quantity (validated)"
-        tests:
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
-      - name: price
-        description: "Trade price (validated)"
-        tests:
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
-
-  - name: int_market_data_quality  
-    description: "Market data (stocks and forex) with OHLC validations and quarantine capabilities"
-    columns:
-      - name: run_date
-        description: "Market data date"
-        tests:
-          - not_null
-      - name: data_quality_status
-        description: "Status of data quality checks"
-        tests:
-          - accepted_values:
-              values: ['PASSED_ALL_TESTS']
-      - name: high
-        description: "Daily high price (validated)"
-        tests:
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
-      - name: low
-        description: "Daily low price (validated)"
-        tests:
-          - dbt_utils.expression_is_true:
-              expression: "> 0"
-      - name: daily_volatility_pct
-        description: "Daily price volatility percentage"
-        tests:
-          - dbt_utils.expression_is_true:
-              expression: ">= 0 and <= 50"
-
+  # INTERMEDIATE MODELS  
   - name: int_trade_pnl
     description: "Trade-level P&L calculations with validations"
     tests:

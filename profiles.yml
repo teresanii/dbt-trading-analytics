@@ -1,0 +1,19 @@
+dbt_trading:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: 'not needed'
+      user: 'not needed'
+      role: accountadmin
+      database: DBT_HOL_2025_DEV
+      schema: public
+      warehouse: admin_wh
+    prod:
+      type: snowflake
+      account: 'not needed'
+      user: 'not needed'
+      role: accountadmin
+      database: DBT_HOL_2025_DEV
+      schema: prod
+      warehouse: admin_wh

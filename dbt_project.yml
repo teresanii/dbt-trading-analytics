@@ -1,11 +1,12 @@
 # Name your project! Project names should contain only lowercase characters
 # and underscores. A good package name should reflect your organization's
 # name or the intended use of these models
-name: 'dbt_project'
+name: 'dbt_trading'
 version: '1.0.0'
+config-version: 2
 
 # This setting configures which "profile" dbt uses for this project.
-profile: 'dbt_project'
+profile: 'dbt_trading'
 
 # These configurations specify where dbt should look for different types of files.
 # The `model-paths` config, for example, states that models in this project can be
@@ -28,43 +29,31 @@ clean-targets:         # directories to be removed by `dbt clean`
 # In this example config, we tell dbt to build all models in the example/
 # directory as views. These settings can be overridden in the individual model
 # files using the `{{ config(...) }}` macro.
-flags:
-  enable_iceberg_materializations: True
+# flags:
+#   enable_iceberg_materializations: True
 
 models:
-  dbt_project:
-    # Config indicated by + and applies to all files under models/example/
-    # example:
-    #   +materialized: view
-    
-    # Staging models - Light blue color
+  dbt_trading:
     staging:
       +schema: 01_staging
       +docs:
         node_color: "#ADD8E6"  # Light blue
-      +materialized: view
-      # +materialized: table
-      
-            
-    # Intermediate models - Brown color
+      +materialized: table
     intermediate:
       +schema: 02_intermediate
       +docs:
         node_color: "#8B4513"  # Brown
-      +materialized: view        
+      +materialized: view
       # +materialized: dynamic_table
-      # +target_lag: downstream
+      # +target_lag: 1 minutes 
       # +snowflake_warehouse: VWH_DBT_HOL
-      # +refresh_mode: incremental
-      
-    # Mart models - Dark red color
+      # +refresh_mode: INCREMENTAL
     marts:
       +schema: 03_marts
       +docs:
         node_color: "#8B0000"  # Dark red
       +materialized: view
       # +materialized: dynamic_table
-      # +target_lag: '1 minute'
+      # +target_lag: 1 minutes 
       # +snowflake_warehouse: VWH_DBT_HOL
-      # +refresh_mode: incremental
-
+      # +refresh_mode: INCREMENTAL

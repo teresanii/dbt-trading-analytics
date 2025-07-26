@@ -57,7 +57,7 @@ sources:
       {%- elif target.name == "prod"  -%} dbt_hol_2025_prod
       {%- else -%} invalid_database
       {%- endif -%}
-    schema: public
+    schema: dev
     tables:
       - name: trading_books
         description: "Trading book data"
@@ -92,7 +92,7 @@ sources:
       {%- elif target.name == "prod"  -%} dbt_hol_2025_prod
       {%- else -%} invalid_database
       {%- endif -%}
-    schema: public
+    schema: dev
     tables:
       - name: weights_table
         description: "Portfolio target allocations by region and desk"

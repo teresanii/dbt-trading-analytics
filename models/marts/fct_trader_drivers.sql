@@ -1,4 +1,11 @@
-
+{#
+{{ config(
+    materialized="dynamic_table",
+    target_lag="1 minute",
+    snowflake_warehouse="VWH_DBT_HOL",
+    refresh_mode="FULL"
+) }}
+#}
 
 with extracted_entities as (
     select * from {{ ref('int_extracted_entities') }}

@@ -1,3 +1,11 @@
+{#
+{{ config(
+    materialized="dynamic_table",
+    target_lag="downstream",
+    snowflake_warehouse="VWH_DBT_HOL",
+    refresh_mode="FULL",
+) }}
+#} 
 
 with trading_books as (
     select * from {{ ref('stg_trading_books') }}

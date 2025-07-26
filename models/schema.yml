@@ -1,6 +1,183 @@
 version: 2
 
 models:
+  # STAGING MODELS
+  - name: stg_trading_books
+    description: "Cleaned trading book data with essential validations"
+    columns:
+      - name: trade_id
+        description: "Unique trade identifier"
+        tests:
+          - unique
+          - not_null
+      - name: trade_date
+        description: "Date of the trade"
+        tests:
+          - not_null
+      - name: trader_name
+        description: "Name of the trader"
+        tests:
+          - not_null
+      - name: desk
+        description: "Trading desk name"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['EQUITIES', 'FIXED_INCOME', 'FX', 'COMMODITIES', 'DERIVATIVES']
+      - name: ticker
+        description: "Traded instrument"
+        tests:
+          - not_null
+      - name: quantity
+        description: "Trade quantity"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: price
+        description: "Trade price"  
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: trade_type
+        description: "Type of trade (BUY/SELL)"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['BUY', 'SELL']
+
+  - name: stg_stock_metrics
+    description: "Cleaned stock market data with OHLC validations"
+    columns:
+      - name: run_date
+        description: "Market data date"
+        tests:
+          - not_null
+      - name: ticker
+        description: "Stock ticker symbol"
+        tests:
+          - not_null
+      - name: open_price
+        description: "Opening price"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: high_price
+        description: "Highest price"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: low_price
+        description: "Lowest price"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: close_price
+        description: "Closing price"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: volume
+        description: "Trading volume"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+    tests:
+      - ohlc_price_relationships:
+          open_col: open_price
+          high_col: high_price
+          low_col: low_price
+          close_col: close_price
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - run_date
+            - ticker
+
+  - name: stg_forex_metrics
+    description: "Cleaned forex exchange rate data with validations"
+    columns:
+      - name: run_date
+        description: "Market data date"
+        tests:
+          - not_null
+      - name: currency_pair_name
+        description: "Currency pair (e.g., EUR/USD)"
+        tests:
+          - not_null
+      - name: open_rate
+        description: "Opening rate"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: high_rate
+        description: "Highest rate"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: low_rate
+        description: "Lowest rate"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: close_rate
+        description: "Closing rate"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+    tests:
+      - ohlc_price_relationships:
+          open_col: open_rate
+          high_col: high_rate
+          low_col: low_rate
+          close_col: close_rate
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - run_date
+            - currency_pair_name
+
+  - name: stg_weights
+    description: "Portfolio target allocations with validations"
+    columns:
+      - name: region
+        description: "Geographic region"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['NORTH_AMERICA', 'EUROPE', 'ASIA_PACIFIC', 'EMERGING_MARKETS']
+      - name: desk
+        description: "Trading desk name"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['EQUITIES', 'FIXED_INCOME', 'FX', 'COMMODITIES', 'DERIVATIVES']
+      - name: target_allocation
+        description: "Target portfolio allocation (should sum to 1.0 per desk)"
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0 and <= 1"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - region
+            - desk
+      - portfolio_allocation_sum:
+          allocation_column: target_allocation
+          group_by_column: desk
+          expected_sum: 1.0
+          tolerance: 0.01
+
+  # INTERMEDIATE MODELS
   - name: int_trading_data_quality
     description: "Trading data with comprehensive quality validations and quarantine capabilities"
     columns:
@@ -25,7 +202,7 @@ models:
           - dbt_utils.expression_is_true:
               expression: "> 0"
 
-  - name: int_market_data_quality
+  - name: int_market_data_quality  
     description: "Market data (stocks and forex) with OHLC validations and quarantine capabilities"
     columns:
       - name: run_date
@@ -53,6 +230,28 @@ models:
           - dbt_utils.expression_is_true:
               expression: ">= 0 and <= 50"
 
+  - name: int_trade_pnl
+    description: "Trade-level P&L calculations with validations"
+    tests:
+      - relationships:
+          to: ref('stg_trading_books')
+          field: trade_id
+
+  - name: int_equity_trade_pnl
+    description: "Equity trade P&L calculations"
+    tests:
+      - relationships:
+          to: ref('int_trade_pnl')
+          field: trade_id
+
+  - name: int_fx_trade_pnl
+    description: "FX trade P&L calculations"
+    tests:
+      - relationships:
+          to: ref('int_trade_pnl')
+          field: trade_id
+
+  # MART MODELS
   - name: fct_data_quality_dashboard
     description: "Comprehensive data quality monitoring dashboard"
     columns:
@@ -73,9 +272,44 @@ models:
           - accepted_values:
               values: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
-tests:
-  - name: test_ohlc_relationship_consistency
-    description: "Custom test to ensure OHLC price relationships are valid across all market data"
-    
-  - name: test_trading_data_completeness
-    description: "Custom test to ensure no critical trading data is missing" 
+  - name: fct_pnl_by_desk
+    description: "P&L aggregated by trading desk"
+    columns:
+      - name: desk
+        description: "Trading desk"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['EQUITIES', 'FIXED_INCOME', 'FX', 'COMMODITIES', 'DERIVATIVES']
+      - name: trade_date
+        description: "Trade date"
+        tests:
+          - not_null
+      - name: total_pnl
+        description: "Total P&L for the desk on the date"
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - desk
+            - trade_date
+
+  - name: fct_pnl_vs_target
+    description: "P&L vs target allocations analysis"
+    tests:
+      - relationships:
+          to: ref('stg_weights')
+          field: desk
+
+  - name: fct_trader_drivers
+    description: "Key performance indicators for individual traders"
+    columns:
+      - name: trader_name
+        description: "Trader name"
+        tests:
+          - not_null
+    tests:
+      - relationships:
+          to: ref('stg_trading_books')
+          field: trader_name 

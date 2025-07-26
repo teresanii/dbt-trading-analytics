@@ -1,92 +1,86 @@
-{{ config(
+{{
+  config(
     materialized='table',
-    post_hook="call system$log('info', 'Market data quality checks completed. Check quarantine tables for failed records.')"
-) }}
+    post_hook="{{ log('Market data quality check completed. Check quarantine table for failed records.', info=True) }}"
+  )
+}}
 
-with stock_data as (
-    select 
-        *,
-        'STOCK' as data_source
-    from {{ ref('stg_stock_metrics') }}
-),
+{# Define data quality test conditions for market data #}
+{% set test_conditions = [
+    {
+        'name': 'high_gte_open',
+        'test': 'high >= open_price'
+    },
+    {
+        'name': 'high_gte_low',
+        'test': 'high >= low_price'
+    },
+    {
+        'name': 'high_gte_close',
+        'test': 'high >= close_price'
+    },
+    {
+        'name': 'low_lte_open',
+        'test': 'low_price <= open_price'
+    },
+    {
+        'name': 'low_lte_high',
+        'test': 'low_price <= high'
+    },
+    {
+        'name': 'low_lte_close',
+        'test': 'low_price <= close_price'
+    },
+    {
+        'name': 'all_prices_positive',
+        'test': 'open_price > 0 and high > 0 and low_price > 0 and close_price > 0'
+    },
+    {
+        'name': 'volume_non_negative',
+        'test': 'coalesce(volume, 0) >= 0'
+    },
+    {
+        'name': 'reasonable_volatility',
+        'test': '((high - low_price) / open_price * 100) <= 50'
+    }
+] %}
 
-forex_data as (
+with combined_market_data as (
+    -- Combine stock and forex data
     select 
         run_date,
-        currency_pair_name as ticker,
-        open,
-        high,
-        low,
-        close,
+        ticker as symbol,
+        'STOCK' as data_type,
+        open_price,
+        high_price as high,
+        low_price,
+        close_price,
+        volume,
+        current_timestamp() as processed_at
+    from {{ ref('stg_stock_metrics') }}
+    
+    union all
+    
+    select 
+        run_date,
+        currency_pair_name as symbol,
+        'FOREX' as data_type,
+        open_rate as open_price,
+        high_rate as high,
+        low_rate as low_price,
+        close_rate as close_price,
         null as volume,
-        'FOREX' as data_source
+        current_timestamp() as processed_at
     from {{ ref('stg_forex_metrics') }}
 ),
 
-combined_market_data as (
-    select * from stock_data
-    union all
-    select * from forex_data
-),
-
--- Apply comprehensive OHLC and market data validation
-validated_market_data as (
-    {{
-        quarantine_failed_records(
-            'combined_market_data',
-            [
-                {
-                    'name': 'valid_run_date',
-                    'test': 'run_date is not null and run_date <= current_date() and run_date >= date(\'2020-01-01\')'
-                },
-                {
-                    'name': 'valid_ticker_symbol',
-                    'test': 'ticker is not null and length(trim(ticker)) > 0'
-                },
-                {
-                    'name': 'valid_ohlc_not_null',
-                    'test': 'open is not null and high is not null and low is not null and close is not null'
-                },
-                {
-                    'name': 'valid_ohlc_positive',
-                    'test': 'open > 0 and high > 0 and low > 0 and close > 0'
-                },
-                {
-                    'name': 'valid_high_low_relationship',
-                    'test': 'high >= low'
-                },
-                {
-                    'name': 'valid_ohlc_range',
-                    'test': 'open >= low and open <= high and close >= low and close <= high'
-                },
-                {
-                    'name': 'reasonable_price_range',
-                    'test': 'case when data_source = \'STOCK\' then high <= 10000 and low >= 0.01 when data_source = \'FOREX\' then high <= 10 and low >= 0.001 else true end'
-                },
-                {
-                    'name': 'valid_daily_price_volatility',
-                    'test': '((high - low) / ((high + low) / 2)) <= 0.5'
-                },
-                {
-                    'name': 'valid_volume_stock',
-                    'test': 'case when data_source = \'STOCK\' then (volume is null or volume >= 0) else true end'
-                },
-                {
-                    'name': 'valid_forex_pair_format',
-                    'test': 'case when data_source = \'FOREX\' then ticker like \'%/%\' and length(ticker) = 7 else true end'
-                }
-            ],
-            'ticker'
-        )
-    }}
+{# Use quarantine handler to separate clean vs failed records #}
+quality_checked as (
+    {{ quarantine_failed_records('combined_market_data', test_conditions, 'symbol || run_date') }}
 )
 
 select 
     *,
-    -- Add quality metrics
     'PASSED_ALL_TESTS' as data_quality_status,
-    ((high - low) / ((high + low) / 2)) * 100 as daily_volatility_pct,
-    ((close - open) / open) * 100 as daily_return_pct,
-    current_timestamp() as quality_check_timestamp,
-    '{{ invocation_id }}' as quality_check_run_id
-from validated_market_data 
+    ((high - low_price) / open_price * 100) as daily_volatility_pct
+from quality_checked 

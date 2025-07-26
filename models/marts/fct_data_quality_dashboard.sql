@@ -87,7 +87,7 @@ model_summary as (
     count(*) as total_test_types_failing,
     sum(total_failures) as total_model_failures,
     max(latest_failure) as model_latest_failure,
-    string_agg(test_type, ', ') as failing_test_types,
+    listagg(test_type, ', ') as failing_test_types,
     
     -- Create model-level investigation queries
     'SELECT table_name, count(*) as failures FROM information_schema.tables WHERE table_schema = ''' || 

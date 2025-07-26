@@ -1,122 +1,192 @@
 {{ config(
     materialized='table',
-    description='Comprehensive data quality dashboard showing quarantine statistics and trends'
+    description='Data quality dashboard showing test failures from dbt audit tables with ready-to-use queries'
 ) }}
 
-with trading_quarantine_summary as (
+{# Get the audit schema name dynamically #}
+{% set audit_schema = target.schema ~ '_dbt_test__audit' %}
+
+{# Get all audit tables dynamically #}
+{% set audit_tables_query %}
+  select table_name
+  from information_schema.tables 
+  where table_schema = '{{ audit_schema }}'
+    and table_type = 'BASE TABLE'
+{% endset %}
+
+{% if execute %}
+  {% set audit_tables_result = run_query(audit_tables_query) %}
+  {% set audit_tables = audit_tables_result.columns[0].values() %}
+{% else %}
+  {% set audit_tables = [] %}
+{% endif %}
+
+with audit_table_summary as (
+  {% for table in audit_tables %}
     select
-        'TRADING_DATA' as data_source,
-        'raw_trading_data_quarantine' as quarantine_table,
-        count(*) as total_quarantined_records,
-        count(distinct quarantine_run_id) as total_runs,
-        max(quarantine_timestamp) as last_quarantine_run,
-        min(quarantine_timestamp) as first_quarantine_run,
-        failed_tests,
-        -- Parse individual test failures
-        array_size(failed_tests) as number_of_failed_tests,
-        count(*) as records_with_this_failure_pattern
-    from {{ this.database }}.{{ this.schema }}.raw_trading_data_quarantine
-    where quarantine_timestamp >= current_date() - 30  -- Last 30 days
-    group by failed_tests
+      '{{ table }}' as audit_table_name,
+      
+      -- Parse test information from table name
+      case 
+        when '{{ table }}' like 'unique_%' then 'UNIQUE_CONSTRAINT'
+        when '{{ table }}' like 'not_null_%' then 'NOT_NULL_CHECK' 
+        when '{{ table }}' like 'accepted_values_%' then 'ACCEPTED_VALUES'
+        when '{{ table }}' like 'relationships_%' then 'REFERENTIAL_INTEGRITY'
+        when '{{ table }}' like 'dbt_utils_expression_is_true_%' then 'BUSINESS_RULE'
+        when '{{ table }}' like 'dbt_utils_unique_combination_%' then 'COMPOSITE_UNIQUE'
+        else 'OTHER_TEST'
+      end as test_type,
+      
+      -- Extract model name from table name
+      case
+        when '{{ table }}' like 'unique_%' then 
+          regexp_replace('{{ table }}', '^unique_([^_]+(?:_[^_]+)*)_[^_]+$', '\\1')
+        when '{{ table }}' like 'not_null_%' then 
+          regexp_replace('{{ table }}', '^not_null_([^_]+(?:_[^_]+)*)_[^_]+$', '\\1')
+        when '{{ table }}' like 'accepted_values_%' then 
+          split_part('{{ table }}', '_', 3)
+        else 
+          split_part('{{ table }}', '_', 2)
+      end as model_name,
+      
+      -- Get failure statistics
+      count(*) as total_failures,
+      max(dbt_updated_at) as latest_failure,
+      min(dbt_updated_at) as earliest_failure,
+      count(distinct dbt_invocation_id) as failure_runs,
+      
+      -- Create ready-to-use query
+      'SELECT * FROM {{ audit_schema }}.{{ table }} ORDER BY dbt_updated_at DESC LIMIT 100;' as sample_query,
+      'SELECT COUNT(*) as total_bad_records FROM {{ audit_schema }}.{{ table }};' as count_query,
+      'SELECT * FROM {{ audit_schema }}.{{ table }} WHERE dbt_updated_at >= CURRENT_DATE - 7;' as recent_failures_query
+      
+    from {{ audit_schema }}.{{ table }}
+    {% if not loop.last %}union all{% endif %}
+  {% endfor %}
+  
+  {% if audit_tables|length == 0 %}
+    -- Placeholder when no audit tables exist yet
+    select 
+      'no_failures_detected' as audit_table_name,
+      'NO_FAILURES' as test_type,
+      'all_models' as model_name,
+      0 as total_failures,
+      null::timestamp as latest_failure,
+      null::timestamp as earliest_failure,
+      0 as failure_runs,
+      'No data quality issues detected!' as sample_query,
+      'No failures to count' as count_query,
+      'No recent failures found' as recent_failures_query
+    where false  -- This ensures no actual rows when there are no failures
+  {% endif %}
 ),
 
-market_data_quarantine_summary as (
-    select
-        'MARKET_DATA' as data_source,
-        'combined_market_data_quarantine' as quarantine_table,
-        count(*) as total_quarantined_records,
-        count(distinct quarantine_run_id) as total_runs,
-        max(quarantine_timestamp) as last_quarantine_run,
-        min(quarantine_timestamp) as first_quarantine_run,
-        failed_tests,
-        array_size(failed_tests) as number_of_failed_tests,
-        count(*) as records_with_this_failure_pattern
-    from {{ this.database }}.{{ this.schema }}.combined_market_data_quarantine
-    where quarantine_timestamp >= current_date() - 30  -- Last 30 days
-    group by failed_tests
+model_summary as (
+  select
+    model_name,
+    count(*) as total_test_types_failing,
+    sum(total_failures) as total_model_failures,
+    max(latest_failure) as model_latest_failure,
+    string_agg(test_type, ', ') as failing_test_types,
+    
+    -- Create model-level investigation queries
+    'SELECT table_name, count(*) as failures FROM information_schema.tables WHERE table_schema = ''' || 
+    '{{ audit_schema }}'' AND table_name LIKE ''%' || model_name || '%'' GROUP BY table_name;' as model_audit_query
+    
+  from audit_table_summary
+  where total_failures > 0
+  group by model_name
 ),
 
-combined_quarantine_stats as (
-    select * from trading_quarantine_summary
-    union all
-    select * from market_data_quarantine_summary
+test_type_summary as (
+  select
+    test_type,
+    count(*) as models_affected,
+    sum(total_failures) as test_type_total_failures,
+    max(latest_failure) as test_type_latest_failure,
+    
+    -- Priority scoring
+    case test_type
+      when 'UNIQUE_CONSTRAINT' then 1      -- Highest priority
+      when 'NOT_NULL_CHECK' then 2
+      when 'REFERENTIAL_INTEGRITY' then 3
+      when 'BUSINESS_RULE' then 4
+      when 'ACCEPTED_VALUES' then 5
+      when 'COMPOSITE_UNIQUE' then 6
+      else 7
+    end as priority_score
+    
+  from audit_table_summary  
+  where total_failures > 0
+  group by test_type
 ),
 
--- Calculate quality scores
-data_quality_scores as (
-    select
-        data_source,
-        quarantine_table,
-        total_quarantined_records,
-        total_runs,
-        last_quarantine_run,
-        first_quarantine_run,
-        failed_tests,
-        number_of_failed_tests,
-        records_with_this_failure_pattern,
-        -- Calculate quality score (higher is better)
-        case 
-            when total_quarantined_records = 0 then 100.0
-            else greatest(0, 100.0 - (total_quarantined_records / 1000.0 * 100))
-        end as data_quality_score,
-        -- Categorize failure severity
-        case
-            when number_of_failed_tests >= 5 then 'CRITICAL'
-            when number_of_failed_tests >= 3 then 'HIGH'
-            when number_of_failed_tests >= 2 then 'MEDIUM'
-            else 'LOW'
-        end as failure_severity,
-        -- Calculate trends
-        case
-            when datediff('day', first_quarantine_run, last_quarantine_run) > 0
-            then total_quarantined_records / datediff('day', first_quarantine_run, last_quarantine_run)
-            else 0
-        end as avg_daily_quarantine_rate
-    from combined_quarantine_stats
-),
-
--- Create summary statistics
 final_dashboard as (
-    select
-        data_source,
-        quarantine_table,
-        total_quarantined_records,
-        total_runs,
-        last_quarantine_run,
-        first_quarantine_run,
-        failed_tests,
-        number_of_failed_tests,
-        records_with_this_failure_pattern,
-        data_quality_score,
-        failure_severity,
-        avg_daily_quarantine_rate,
-        -- Add recommendations
-        case
-            when failure_severity = 'CRITICAL' then 'IMMEDIATE ACTION REQUIRED: Multiple data quality failures detected'
-            when failure_severity = 'HIGH' then 'HIGH PRIORITY: Review data sources and validation rules'
-            when failure_severity = 'MEDIUM' then 'MEDIUM PRIORITY: Monitor trends and investigate patterns'
-            when failure_severity = 'LOW' then 'LOW PRIORITY: Standard monitoring sufficient'
-            else 'GOOD: No major data quality issues detected'
-        end as recommendation,
-        -- Quality trend indicators
-        case
-            when avg_daily_quarantine_rate > 100 then 'DETERIORATING'
-            when avg_daily_quarantine_rate > 50 then 'CONCERNING'
-            when avg_daily_quarantine_rate > 10 then 'STABLE'
-            else 'IMPROVING'
-        end as quality_trend,
-        current_timestamp() as dashboard_refresh_time
-    from data_quality_scores
+  select
+    -- Main dashboard columns
+    a.audit_table_name,
+    a.test_type,
+    a.model_name,
+    a.total_failures,
+    a.latest_failure,
+    a.earliest_failure,
+    a.failure_runs,
+    
+    -- Severity classification
+    case 
+      when a.total_failures > 1000 then 'CRITICAL'
+      when a.total_failures > 100 then 'HIGH'
+      when a.total_failures > 10 then 'MEDIUM'
+      else 'LOW'
+    end as severity,
+    
+    -- Trend analysis
+    case
+      when a.latest_failure >= current_date - 1 then 'RECENT' 
+      when a.latest_failure >= current_date - 7 then 'THIS_WEEK'
+      when a.latest_failure >= current_date - 30 then 'THIS_MONTH'
+      else 'OLDER'
+    end as recency,
+    
+    -- Ready-to-use investigation queries
+    a.sample_query,
+    a.count_query, 
+    a.recent_failures_query,
+    
+    -- Model-level context
+    m.total_test_types_failing,
+    m.total_model_failures,
+    m.failing_test_types,
+    m.model_audit_query,
+    
+    -- Test type context  
+    t.models_affected as test_type_models_affected,
+    t.test_type_total_failures,
+    t.priority_score,
+    
+    -- Recommendations
+    case
+      when a.total_failures > 1000 then 'URGENT: Investigate immediately - run: ' || a.sample_query
+      when a.total_failures > 100 then 'HIGH PRIORITY: Review data source - run: ' || a.count_query  
+      when a.total_failures > 10 then 'MEDIUM PRIORITY: Monitor trend - run: ' || a.recent_failures_query
+      else 'LOW PRIORITY: Occasional failures acceptable'
+    end as recommendation,
+    
+    current_timestamp() as dashboard_updated_at
+    
+  from audit_table_summary a
+  left join model_summary m on a.model_name = m.model_name
+  left join test_type_summary t on a.test_type = t.test_type
+  where a.total_failures > 0
 )
 
 select * from final_dashboard
 order by 
-    case failure_severity
-        when 'CRITICAL' then 1
-        when 'HIGH' then 2
-        when 'MEDIUM' then 3
-        when 'LOW' then 4
-        else 5
-    end,
-    data_quality_score asc,
-    total_quarantined_records desc 
+  priority_score,
+  case severity
+    when 'CRITICAL' then 1
+    when 'HIGH' then 2
+    when 'MEDIUM' then 3
+    else 4
+  end,
+  total_failures desc 

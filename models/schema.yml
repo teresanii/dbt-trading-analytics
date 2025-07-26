@@ -186,24 +186,45 @@ models:
 
   # MART MODELS
   - name: fct_data_quality_dashboard
-    description: "Comprehensive data quality monitoring dashboard"
+    description: "Data quality dashboard showing test failures from audit tables with ready-to-use queries"
     columns:
-      - name: data_source
-        description: "Source of the data (TRADING_DATA, MARKET_DATA)"
+      - name: audit_table_name
+        description: "Name of the audit table containing bad records"
+        tests:
+          - not_null
+      - name: test_type
+        description: "Type of test that failed"
         tests:
           - not_null
           - accepted_values:
-              values: ['TRADING_DATA', 'MARKET_DATA']
-      - name: data_quality_score
-        description: "Quality score from 0-100 (higher is better)"
+              values: ['UNIQUE_CONSTRAINT', 'NOT_NULL_CHECK', 'ACCEPTED_VALUES', 'REFERENTIAL_INTEGRITY', 'BUSINESS_RULE', 'COMPOSITE_UNIQUE', 'OTHER_TEST']
+      - name: model_name
+        description: "dbt model that has failing records"
         tests:
+          - not_null
+      - name: total_failures
+        description: "Total number of bad records in this audit table"
+        tests:
+          - not_null
           - dbt_utils.expression_is_true:
-              expression: ">= 0 and <= 100"
-      - name: failure_severity
-        description: "Severity classification of data quality issues"
+              expression: ">= 0"
+      - name: severity
+        description: "Severity level based on number of failures"
         tests:
           - accepted_values:
               values: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+      - name: sample_query
+        description: "Ready-to-use SQL query to see sample bad records"
+        tests:
+          - not_null
+      - name: count_query
+        description: "Ready-to-use SQL query to count bad records"
+        tests:
+          - not_null
+      - name: recent_failures_query
+        description: "Ready-to-use SQL query to see recent failures"
+        tests:
+          - not_null
 
   - name: fct_pnl_by_desk
     description: "P&L aggregated by trading desk"

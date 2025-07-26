@@ -63,12 +63,3 @@ tests:
   dbt_trading:
     +store_failures: true
     +severity: warn  # Most tests as warnings, not errors
-    staging:
-      +store_failures: true
-      +severity: warn
-    intermediate:
-      +store_failures: true  
-      +severity: warn
-    marts:
-      +store_failures: true
-      +severity: warn
